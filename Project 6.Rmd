@@ -1,0 +1,152 @@
+---
+title: "Project 6 - Blood Donation Prediction"
+output: html_notebook
+---
+
+PART A
+
+Load packages
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tree)
+library(boot)
+library(caret)
+library(e1071)
+library(arm)
+library(xgboost)
+library(lattice)
+library(rattle)
+library(kernlab)
+library(rpart)
+library(ggcorrplot)
+library(corrplot)
+library(MASS)
+library(pROC)
+```
+
+Load datasets
+
+```{r}
+blood_train = read_excel("blood_traindata.xlsx")
+blood_test = read_excel("blood_testdata.xlsx")
+blood_test.1 = read_excel("blood_testactual.xlsx")
+```
+
+Change the column names
+
+```{r}
+colnames(blood_train) = c("ID", "lastd","num","volume","firstd","donate")
+colnames(blood_test) = c("ID", "lastd","num","volume","firstd")
+colnames(blood_test.1) = c("ID", "lastd","num","volume","firstd","rdonate")
+```
+
+Correlation plot
+
+```{r}
+corrplot(cor(blood_train[,-1]), type="lower", method="number")
+```
+
+Subset to the variables needed for the model
+
+```{r}
+blood_train = subset(blood_train, select = -c(ID))
+blood_test = subset(blood_test, select = -c(ID))
+blood_test.1 = subset(blood_test.1, select = -c(ID))
+
+blood_train$volog= log(blood_train$volume)
+blood_test$volog = log(blood_test$volume)
+
+hist(blood_train$volume)
+hist(blood_train$volog)
+```
+
+Logistic Regression
+
+```{r}
+logit1 = glm(donate~ lastd + firstd + num , blood_train, family="binomial")
+summary(logit1)
+logit2 = glm(donate~ lastd + firstd + volume , blood_train, family="binomial")
+summary(logit2)
+logit3 = glm(donate~ lastd + firstd + num + volog , blood_train, family="binomial")
+summary(logit3)
+logit4 = glm(donate~ lastd + firstd + volog , blood_train, family="binomial")
+summary(logit4)
+```
+
+Machine learning models
+
+```{r}
+blood_train=blood_train[,!names(blood_train) %in% c("num", "volume")] 
+blood_test=blood_test[,!names(blood_test) %in% c("num", "volume")] 
+
+## 10-fold Cross-Validation
+control = trainControl(method="cv", number=10)
+metric = "Accuracy"
+blood_train$donate = as.factor(blood_train$donate)
+
+# Linear Discriminant Analysis (LDA)
+set.seed(1)
+lda.blood = train(donate ~ ., data=blood_train, method="lda", metric=metric, trControl=control)
+
+# Classfication and Regression Trees (CART)
+set.seed(1)
+cart.blood = train(donate ~ ., data=blood_train, method="rpart", metric=metric, trControl=control)
+
+# k-Nearest Neighbors (KNN)
+set.seed(1)
+knn.blood = train(donate ~ ., data=blood_train, method="knn", metric=metric, trControl=control)
+
+# Bayesian Generalized Linear Model
+set.seed(1)
+bay.blood = train(donate ~ ., data=blood_train, method="bayesglm", metric=metric, trControl=control)
+
+# Support Vector Machines (SVM)
+set.seed(1)
+svm.blood = train(donate ~ ., data=blood_train, method="svmRadial", metric=metric, trControl=control)
+
+# Random Forest
+set.seed(1)
+rf.blood = train(donate ~ ., data=blood_train, method="rf", metric=metric, trControl=control)
+
+# Gradient Boosting Machines/XGBoost
+set.seed(1)
+xgb.blood = train(donate ~ ., data=blood_train, method="xgbTree", metric=metric, trControl=control)
+
+# Logistic Regression
+set.seed(1)
+logi.blood = train(donate~., data=blood_train, method="glm", metric=metric, trControl=control)
+```
+
+Model selection
+
+```{r}
+# Select Best Model
+# summarize accuracy of models
+results = resamples(list(lda=lda.blood, cart=cart.blood, knn=knn.blood, bay=bay.blood, svm=svm.blood, rf=rf.blood, xgb=xgb.blood, logi=logi.blood))
+summary(results)
+
+print(xgb.blood)
+```
+
+Prediction
+
+```{r}
+
+blood_test$donate1 = predict(xgb.blood, newdata=blood_test)
+mean(blood_test$donate1==blood_test.1$rdonate)
+table(blood_test$donate1,blood_test.1$rdonate)
+
+```
+
+ROC curve
+
+```{r}
+pred.xgb = predict(xgb.blood, type = "prob", blood_train)
+pred.xgb_1 = as.numeric(pred.xgb[,2])
+xgb.roc = roc(response = blood_train$donate, predictor = pred.xgb_1)
+plot(xgb.roc, legacy.axes = TRUE, print.auc.y = 1.0, print.auc = TRUE)
+coords(xgb.roc, "best", "threshold")
+```
+
